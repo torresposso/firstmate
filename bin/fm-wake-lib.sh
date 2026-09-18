@@ -698,7 +698,14 @@ _fm_recovery_marker_begin_handling() {
     fm_lock_release "$lock"
     return 3
   fi
+  # An already-acknowledged episode has already had its handling turn: the ack
+  # the drain prints is run only after handling completes, so a matching-
+  # generation acknowledgement inside the handling window settles the handshake
+  # instead of rejecting it. The drain republishes an acked marker into a fresh
+  # generation before it calls this function, so this branch is reachable only
+  # from a delivery confirmation that arrives after that acknowledgement.
   case "$line" in
+    acked:*) ;;
     pending:handling:*|announced:handling:*) ;;
     pending:downtime:*)
       if ! _fm_recovery_marker_write_locked "$marker" handling "$generation"; then

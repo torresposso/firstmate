@@ -1401,6 +1401,108 @@ EOF
   pass "Pi refused handling handshake is classified and not swallowed"
 }
 
+# A verified successor whose watcher already ended before the confirmation must
+# not strand the home: leaving the closing arm child alone lets its own failure
+# close earn the deferred bounded retry, and the delivered wake must name that
+# restoration instead of reading as a terminal failure.
+test_pi_dead_watcher_confirmation_restores_bounded_retry() {
+  local repo home plugin log stop out status
+  repo="$TMP_ROOT/pi-dead-watcher-root"
+  home="$TMP_ROOT/pi-dead-watcher-home"
+  log="$TMP_ROOT/pi-dead-watcher.log"
+  stop="$TMP_ROOT/pi-dead-watcher.stop"
+  mkdir -p "$repo/bin" "$home/state" "$home/config"
+  install_pi_watch_extension_fixture "$repo"
+  plugin="$repo/.pi/extensions/fm-primary-pi-watch.ts"
+  cat > "$repo/bin/fm-watch-arm.sh" <<'SH'
+#!/usr/bin/env bash
+if [ "${1:-}" = --handling-delivered ]; then
+  printf 'refused generation=%s watcher=%s\n' "$2" "$4" >> "${FM_ARM_LOG:?}"
+  exit 1
+fi
+printf 'arm=%s predecessor=%s\n' "$$" "${FM_WATCH_PREDECESSOR_ARM_PID:-none}" >> "${FM_ARM_LOG:?}"
+count=$(grep -c '^arm=' "$FM_ARM_LOG")
+if [ "$count" -eq 1 ]; then
+  printf 'watcher: started pid=%s (beacon fresh)\n' "$$"
+  printf 'signal: synthetic wake\n'
+  exit 0
+fi
+if [ "$count" -eq 2 ]; then
+  # The verified successor's watcher is already gone when the wake delivery
+  # confirms it, exactly as a one-shot watcher that surfaced its own wake leaves
+  # it; this arm reaps that child and reports the failure on its own. It stays
+  # up long enough that the confirmation's own retirement (the pre-fix path)
+  # always races the arm's natural close.
+  printf 'watcher: started pid=999999 (beacon fresh) recovery-generation=fixture-dead-generation\n'
+  sleep 1.5
+  printf 'watcher: FAILED - successor watcher exited before delivery confirmation\n'
+  exit 3
+fi
+printf 'watcher: started pid=%s (beacon fresh) recovery-generation=fixture-dead-generation\n' "$$"
+trap 'exit 0' TERM INT
+while [ ! -e "$FM_STOP_FILE" ]; do sleep 0.02; done
+SH
+  chmod +x "$repo/bin/fm-watch-arm.sh"
+  out=$(PLUGIN="$plugin" FM_HOME="$home" FM_ROOT_OVERRIDE="$repo" FM_ARM_LOG="$log" FM_STOP_FILE="$stop" FM_WATCH_REARM_RETRY_BASE_MS=5 FM_WATCH_REARM_RETRY_MAX_MS=10 FM_WATCH_REARM_RETRY_LIMIT=2 node --input-type=module 2>&1 <<'EOF'
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
+let tool = null;
+const prompts = [];
+const pi = {
+  on() {},
+  registerCommand() {},
+  registerTool(candidate) {
+    if (candidate.name === "fm_watch_arm_pi") tool = candidate;
+  },
+  sendUserMessage: async (message) => {
+    prompts.push(message);
+  },
+};
+const armRows = () => existsSync(process.env.FM_ARM_LOG)
+  ? readFileSync(process.env.FM_ARM_LOG, "utf8").split("\n").filter((row) => row.startsWith("arm="))
+  : [];
+async function waitFor(predicate, message) {
+  for (let i = 0; i < 600; i += 1) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(message);
+}
+writeFileSync(`${process.env.FM_HOME}/state/.lock`, `${process.pid}\n`);
+const mod = await import(pathToFileURL(process.env.PLUGIN).href);
+mod.default(pi);
+await tool.execute("tool-call-dead-watcher", {}, undefined, undefined, {});
+await waitFor(
+  () => prompts.some((message) => message.includes("handling delivery confirmation was rejected")),
+  `the rejected confirmation was not delivered: ${prompts.join(" | ")}`,
+);
+await waitFor(
+  () => armRows().length >= 3,
+  `a dead-watcher rejection left no bounded retry cycle: ${armRows().join(" | ")}`,
+);
+const failure = prompts.find((message) => message.includes("handling delivery confirmation was rejected"));
+if (!failure.includes("signal: synthetic wake")) throw new Error(`the wake was dropped from the rejected delivery: ${failure}`);
+if (!failure.includes("watcher: recovery - the successor cycle had already ended")) {
+  throw new Error(`the late-delivered failure did not name its restoration: ${failure}`);
+}
+await new Promise((resolve) => setTimeout(resolve, 200));
+const rows = armRows();
+if (rows.length !== 3) throw new Error(`the bounded retry was not single-flight: ${rows.join(" | ")}`);
+if (!/predecessor=[0-9]+/.test(rows[2])) throw new Error(`the retry did not carry a predecessor identity: ${rows[2]}`);
+if (prompts.filter((message) => message.includes("FIRSTMATE WATCHER WAKE")).length !== 1) {
+  throw new Error(`a dead-watcher rejection was not one typed message: ${prompts.join(" | ")}`);
+}
+writeFileSync(process.env.FM_STOP_FILE, "stop\n");
+process.exit(0);
+EOF
+)
+  status=$?
+  expect_code 0 "$status" "Pi must restore a bounded cycle after a dead-watcher confirmation rejection"
+  [ -z "$out" ] || fail "Pi dead-watcher test printed output: $out"
+  pass "Pi dead-watcher confirmation rejection restores a bounded retry cycle"
+}
+
 test_pi_hung_successor_falls_back_to_typed_wake() {
   local repo home plugin log out status
   repo="$TMP_ROOT/pi-hung-successor-root"
@@ -3990,6 +4092,7 @@ test_pi_heartbeat_is_not_ridden_into_main_by_a_co_present_needs_decision
 test_pi_heartbeat_restoration_failure_stays_on_main
 test_pi_watcher_failure_never_offered_to_branch
 test_pi_handling_delivery_failure_is_typed_once
+test_pi_dead_watcher_confirmation_restores_bounded_retry
 test_pi_hung_successor_falls_back_to_typed_wake
 test_pi_unretired_successor_falls_back_without_retry
 test_pi_late_unretired_close_resumes_supervision
