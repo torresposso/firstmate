@@ -230,14 +230,18 @@ async function deliverActionableWake(paths, client, sessionID, message, recovery
   if (recovery) {
     const confirmed = confirmHandlingDeliveryWithRetry(paths, recovery);
     if (!confirmed.ok) {
+      let deadWatcher = false;
       if (recovery.watcherPid) {
         try {
           process.kill(Number(recovery.watcherPid), 0);
         } catch {
-          await retireArm(child);
+          deadWatcher = true;
         }
       }
-      await sendPrompt(paths, client, sessionID, wakePrompt(`${message}\n\n${confirmed.detail}`));
+      const detail = deadWatcher
+        ? `${confirmed.detail}\nwatcher: recovery - the successor cycle had already ended; watcher continuity is being restored under the bounded retry`
+        : confirmed.detail;
+      await sendPrompt(paths, client, sessionID, wakePrompt(`${message}\n\n${detail}`));
       return;
     }
   }

@@ -526,6 +526,37 @@ test_interrupted_handling_is_redrained_on_rearm() {
   pass "watch-arm: interrupted handling leaves its wake durable for successor re-drain"
 }
 
+# A drain can acknowledge the recovery episode inside the handling window, and
+# the delivery confirmation can arrive after that ack. That matching episode is
+# already handled, so the confirmation must settle instead of rejecting the
+# live successor the adapter just verified.
+test_handling_delivery_confirmation_settles_an_acked_episode() {
+  local dir home state fakebin watcher_pid
+  dir=$(make_case handling-delivered-acked-episode)
+  home="$dir/home"
+  state="$dir/state"
+  fakebin="$dir/fakebin"
+  mkdir -p "$home/data"
+  : > "$state/crew.meta"
+  printf 'acked:handling:seed.1.aaa\n' > "$state/.watcher-down"
+  chmod 600 "$state/.watcher-down"
+
+  start_rearm_arm "$home" "$state" "$fakebin" "$dir/arm.out"
+  is_live_non_zombie "$ARM_PID" || fail "acked-episode fixture watcher did not stay live"
+  watcher_pid=$(cat "$state/.watch.lock/pid" 2>/dev/null || true)
+  [ -n "$watcher_pid" ] || fail "acked-episode fixture watcher published no lock pid"
+
+  FM_HOME="$home" FM_STATE_OVERRIDE="$state" "$WATCH_ARM" --handling-delivered seed.1.aaa \
+    --watcher-pid "$watcher_pid" \
+    || fail "a matching-generation episode acknowledged inside the handling window must settle the confirmation"
+  [ "$(cat "$state/.watcher-down" 2>/dev/null || true)" = "acked:handling:seed.1.aaa" ] \
+    || fail "the settled confirmation rewrote an acknowledged episode"
+  is_live_non_zombie "$watcher_pid" || fail "the settled confirmation did not leave its live watcher"
+  kill -TERM "$ARM_PID" 2>/dev/null || true
+  wait "$ARM_PID" 2>/dev/null || true
+  pass "watch-arm: an episode acknowledged inside the handling window settles the delivery confirmation"
+}
+
 test_malformed_marker_is_quarantined_once() {
   local dir home state fakebin invalid_count
   dir=$(make_case malformed-downtime-marker)
@@ -849,6 +880,7 @@ test_rearm_resurfaces_durable_queue_and_remote_open_decision
 test_marker_publish_failure_retains_recovery_evidence
 test_delivery_gap_wake_is_recovered_once
 test_interrupted_handling_is_redrained_on_rearm
+test_handling_delivery_confirmation_settles_an_acked_episode
 test_malformed_marker_is_quarantined_once
 test_recovery_consumption_serializes_queue_publication
 test_restart_preserves_recovery_across_reused_pid_lock

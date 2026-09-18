@@ -643,11 +643,24 @@ export default function (pi: ExtensionAPI) {
     if (recovery) {
       const confirmed = confirmHandlingDeliveryWithRetry(owner, recovery);
       if (!confirmed.ok) {
-        const watcherPid = recovery.watcherPid;
-        if (!pidAlive(watcherPid)) {
-          await retireArm(owner.child);
-        }
-        return await sendWake(owner, `${message}\n\n${confirmed.detail}`, pending);
+        // Expected rejection: the successor watcher this handoff names already
+        // ended - the arm script's --handling-delivered liveness/lock check
+        // (exit 1) is the failing condition because the cycle closed between
+        // the arm's verified start and this confirmation. A rejection here
+        // must never be the last word: the arm child is that watcher's parent,
+        // so it has already seen the exit and is closing on its own. An
+        // actionable close becomes the next pending and a verified failure
+        // close earns the deferred bounded retry; retiring the child here
+        // would suppress exactly that retry (armRetired makes the close handler
+        // skip deferredClose) and leave the home with no arm child and no
+        // scheduled cycle. Recovery: leave the child alone and name that
+        // restoration in the delivered message, so a follow-up Pi queues and
+        // delivers late never reads as a fresh terminal failure.
+        const deadWatcher = !pidAlive(recovery.watcherPid);
+        const detail = deadWatcher
+          ? `${confirmed.detail}\nwatcher: recovery - the successor cycle had already ended; watcher continuity is being restored under the bounded retry`
+          : confirmed.detail;
+        return await sendWake(owner, `${message}\n\n${detail}`, pending);
       }
     }
     if (!repairFailed) {

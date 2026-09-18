@@ -58,6 +58,18 @@
 # watcher. NEVER `pkill -f
 # bin/fm-watch.sh`: that pattern matches every firstmate home's watcher
 # (secondmate homes run the same script) and would kill siblings.
+#
+# --handling-delivered GENERATION --watcher-pid PID is the adapters' handling
+# handoff confirmation: it is called after a successor watcher was verified and
+# before its wake is delivered. Exit 0 means the handoff is settled - the
+# episode began handling, already began handling, or was already acknowledged
+# by the drain that ran the handling turn. Exit 1 means the named watcher or
+# its lock identity is gone, or the recovery marker could not be read or
+# written; exit 3 means the recovery episode moved on to a different
+# generation. Both nonzero statuses mean the confirmation could not be
+# recorded, never that the wake is lost: the wake is durable in the queue and
+# the adapter owns continuity restoration. bin/fm-wake-lib.sh owns the marker
+# transitions and docs/watcher-continuity.md the adapter contract.
 set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
