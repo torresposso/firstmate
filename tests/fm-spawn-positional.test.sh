@@ -19,9 +19,20 @@ TMP_ROOT=$(fm_test_tmproot fm-spawn-positional)
 export FM_BACKEND=tmux
 
 # A fresh throwaway home per case, so "nothing was created" is answerable.
+#
+# The home also pins a harness. With no config/ the harness comes from local
+# detection, which names a real harness only on a machine that has one installed
+# or running in this process tree; on a clean runner it is `unknown` and every
+# case whose refusal sits after harness resolution fails on "no launch template
+# for harness 'unknown'" instead of on the behavior under test. The secondmate
+# case resolves through config/secondmate-harness and falls back to this crew
+# pin, which is the fallback the script documents. claude is pinned because its
+# launch template is built in, so no case depends on which agent CLI is
+# installed. Cases that refuse before harness resolution are unaffected.
 make_home() {
   local home=$1
-  mkdir -p "$home/data" "$home/projects"
+  mkdir -p "$home/data" "$home/projects" "$home/config"
+  printf 'claude\n' > "$home/config/crew-harness"
 }
 
 run_spawn() {

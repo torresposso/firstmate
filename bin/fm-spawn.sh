@@ -1336,18 +1336,16 @@ fi
 # `id=repo` first positional, so from here a fresh ship or scout spawn requires
 # BOTH positionals, while --secondmate's home positional is optional and
 # --relaunch takes the task id alone (its project or home comes from the task's
-# own record). Name the missing argument here, before any state exists: letting
-# a later `${POS[n]}` expand an absent element would abort with `set -u`'s
-# "POS[n]: unbound variable", which names this script's internals instead of the
-# argument the caller left out.
+# own record). Name the missing `<task-id>` here, before `${POS[0]}` is read:
+# letting that expansion hit an absent element would abort with `set -u`'s
+# "POS[0]: unbound variable", which names this script's internals instead of the
+# argument the caller left out. The `<project-dir>` half is validated below the
+# role partition refusal, so a call that already had its own, more specific
+# refusal keeps it.
 [ "${#POS[@]}" -gt 0 ] || {
   echo "error: missing <task-id> positional (see --help for usage)" >&2
   exit 2
 }
-if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "${#POS[@]}" -lt 2 ]; then
-  echo "error: missing <project-dir> positional for a $KIND spawn (see --help for usage)" >&2
-  exit 2
-fi
 ID=${POS[0]}
 fm_task_id_creation_valid "$ID" || {
   echo "error: invalid task id" >&2
@@ -1370,6 +1368,15 @@ fi
 . "$SCRIPT_DIR/fm-lease-lib.sh"
 if [ "$RELAUNCH" -ne 1 ]; then
   fm_lease_forbid_branch "new-task spawn (fm-spawn)"
+fi
+# A fresh ship or scout spawn still needs its `<project-dir>`. Validate it only
+# now, after the role partition refusal: a branch call already has its own, more
+# specific refusal and must keep its exit status rather than have it replaced by
+# this one. It still runs before the fresh-spawn path creates any state below, so
+# the missing argument is named before this script creates anything.
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "${#POS[@]}" -lt 2 ]; then
+  echo "error: missing <project-dir> positional for a $KIND spawn (see --help for usage)" >&2
+  exit 2
 fi
 if [ "$RELAUNCH" -eq 1 ]; then
   SPAWN_CONTROL_LOCK="$STATE/.control-$ID.lock"
