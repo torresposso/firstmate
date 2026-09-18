@@ -27,7 +27,7 @@ While supervision is still needed and away mode remains inactive, an actionable 
 
 After an actionable Pi, omp, or OpenCode child close, the adapter starts and verifies one singleton successor before it delivers the original wake.
 It confirms the handling handoff against that successor before scheduling the follow-up, retries once against the current generation and successor, and treats a matching-generation episode the drain already acknowledged as a settled handoff rather than a failure, because that acknowledgement is printed only after the handling turn completes.
-Pi's adapter resolves a confirmation rejected against a watcher that already ended without stranding the home: it leaves that watcher's closing arm child alone, so its actionable close becomes the next pending or its verified failure close earns the deferred bounded retry, and it names that restoration in the delivered wake.
+Each adapter resolves a confirmation rejected against a watcher that already ended without stranding the home: it leaves that watcher's closing arm child alone, so its actionable close becomes the next pending or its verified failure close earns the deferred bounded retry, and it names that restoration in the delivered wake.
 A failed confirmation is never swallowed.
 It waits at most one readiness timeout per attempt, then sends TERM and waits a bounded retirement confirmation before the next lock-verified exponential retry.
 If the unready arm does not retire within that bound, the adapter keeps ownership, starts no overlapping retry, and delivers the typed fallback immediately.

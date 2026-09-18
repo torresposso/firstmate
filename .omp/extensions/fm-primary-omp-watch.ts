@@ -580,11 +580,11 @@ export default function (pi: ExtensionAPI) {
     if (recovery) {
       const confirmed = confirmHandlingDeliveryWithRetry(owner, recovery);
       if (!confirmed.ok) {
-        const watcherPid = recovery.watcherPid;
-        if (!pidAlive(watcherPid)) {
-          await retireArm(owner.child);
-        }
-        return await sendWake(owner, `${message}\n\n${confirmed.detail}`, pending);
+        const deadWatcher = !pidAlive(recovery.watcherPid);
+        const detail = deadWatcher
+          ? `${confirmed.detail}\nwatcher: recovery - the successor cycle had already ended; watcher continuity is being restored under the bounded retry`
+          : confirmed.detail;
+        return await sendWake(owner, `${message}\n\n${detail}`, pending);
       }
     }
     // No supervision branch on omp: every actionable wake goes to main.
