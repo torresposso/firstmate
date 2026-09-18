@@ -1332,6 +1332,22 @@ if [ "${#POS[@]}" -gt 0 ] && [ "${POS[0]}" != "$idpart" ] && case "$idpart" in *
   done
   exit "$rc"
 fi
+# Single-task positional shape. The batch block above has already handled an
+# `id=repo` first positional, so from here a fresh ship or scout spawn requires
+# BOTH positionals, while --secondmate's home positional is optional and
+# --relaunch takes the task id alone (its project or home comes from the task's
+# own record). Name the missing argument here, before any state exists: letting
+# a later `${POS[n]}` expand an absent element would abort with `set -u`'s
+# "POS[n]: unbound variable", which names this script's internals instead of the
+# argument the caller left out.
+[ "${#POS[@]}" -gt 0 ] || {
+  echo "error: missing <task-id> positional (see --help for usage)" >&2
+  exit 2
+}
+if [ "$RELAUNCH" -eq 0 ] && [ "$KIND" != secondmate ] && [ "${#POS[@]}" -lt 2 ]; then
+  echo "error: missing <project-dir> positional for a $KIND spawn (see --help for usage)" >&2
+  exit 2
+fi
 ID=${POS[0]}
 fm_task_id_creation_valid "$ID" || {
   echo "error: invalid task id" >&2
